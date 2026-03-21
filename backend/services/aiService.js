@@ -5,8 +5,16 @@ const { triggerViolationAlert } = require('./alertService');
 // Map tracks <cameraID_type>: last_timestamp to avoid spamming the DB for the same incident multiple times per second
 const recentViolationMemory = new Map();
 const DEBOUNCE_TIME_MS = 5000; // 5 seconds cool-down per violation type per camera
+let isAiEnabled = true;
+
+exports.setAiStatus = (status) => {
+    isAiEnabled = status;
+    console.log(`[AI SERVICE] Global AI detection state updated: ${isAiEnabled ? 'ENABLED' : 'DISABLED'}`);
+};
 
 exports.processDetections = async (io, cameraId, detections) => {
+    if (!isAiEnabled) return false;
+    
     // Basic AI Confidence filtering threshold mapped statically
     const MIN_CONFIDENCE = 0.60;
     

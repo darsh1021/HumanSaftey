@@ -69,7 +69,9 @@ const CameraList = ({ cameras, activeCameraId, onSelect, isLoading }) => {
   );
 };
 
-const MainLiveFeed = ({ camera, isPaused, aiEnabled, showZones, setAiEnabled, setIsPaused }) => {
+const MainLiveFeed = ({ camera, isPaused, aiEnabled, showZones, handleAiToggle, setIsPaused, latestAlert }) => {
+  const [streamError, setStreamError] = useState(false);
+  
   if (!camera) {
     return (
       <div className="w-full h-full glass-panel rounded-xl border border-white/10 flex flex-col items-center justify-center bg-black/60">
@@ -80,12 +82,21 @@ const MainLiveFeed = ({ camera, isPaused, aiEnabled, showZones, setAiEnabled, se
   }
 
   const isOnline = camera.status === 'active';
+  const showStream = isOnline && !isPaused && aiEnabled;
+  const isNoHelmet = latestAlert && latestAlert.type === 'no_helmet' && (Date.now() - new Date(latestAlert.timestamp).getTime() < 5000);
 
   return (
     <div className="flex flex-col h-full w-full relative">
       <div className="flex-1 rounded-xl border border-white/10 overflow-hidden relative bg-[#05080f] shadow-2xl flex items-center justify-center group">
          
-         {!isOnline ? (
+         {showStream ? (
+            <img 
+               src={`http://localhost:5000/api/ai/video-feed?camera=${camera._id}&t=${Date.now()}`} 
+               alt="Live Camera Feed"
+               className="w-full h-full object-cover z-10"
+               onError={() => setStreamError(true)}
+            />
+         ) : !isOnline ? (
             <div className="text-center">
               <AlertCircle className="w-10 h-10 text-accent-red mx-auto mb-3 opacity-50" />
               <div className="text-white/30 font-mono text-xs uppercase tracking-widest">Hardware Offline</div>
@@ -95,6 +106,11 @@ const MainLiveFeed = ({ camera, isPaused, aiEnabled, showZones, setAiEnabled, se
               <Pause className="w-10 h-10 text-white/20 mx-auto mb-3" />
               <div className="text-white/30 font-mono text-xs uppercase tracking-widest">Feed Suspended</div>
             </div>
+         ) : !aiEnabled ? (
+            <div className="text-center z-30">
+              <Power className="w-10 h-10 text-white/20 mx-auto mb-3" />
+              <div className="text-white/30 font-mono text-xs uppercase tracking-widest">AI Detection Disabled</div>
+            </div>
          ) : (
             <div className="text-center relative z-10 p-12 max-w-sm">
               <Loader2 className="w-8 h-8 text-accent-blue animate-spin mx-auto mb-4 opacity-40" />
@@ -102,13 +118,37 @@ const MainLiveFeed = ({ camera, isPaused, aiEnabled, showZones, setAiEnabled, se
               <p className="text-white/20 text-[10px] leading-relaxed">
                  Waiting for AI-Inference node to broadcast RTSP packets from {camera.location}...
               </p>
-              
-              {showZones && (
-                 <div className="absolute inset-0 pointer-events-none opacity-20 border-2 border-dashed border-accent-blue/30 m-8 rounded" />
-              )}
             </div>
          )}
          
+         {/* Alert Banner */}
+         <AnimatePresence>
+            {aiEnabled && isOnline && !isPaused && (
+               <motion.div 
+                  initial={{ y: -50, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  exit={{ y: -50, opacity: 0 }}
+                  className={`absolute top-20 left-1/2 -translate-x-1/2 z-50 px-6 py-2 rounded-full border shadow-lg backdrop-blur-md flex items-center gap-3 transition-colors duration-500 ${
+                     isNoHelmet 
+                        ? 'bg-accent-red/20 border-accent-red/50 text-accent-red shadow-accent-red/20' 
+                        : 'bg-accent-green/20 border-accent-green/50 text-accent-green shadow-accent-green/20'
+                  }`}
+               >
+                  {isNoHelmet ? (
+                     <>
+                        <AlertTriangle className="w-5 h-5 animate-pulse" />
+                        <span className="font-bold font-logo tracking-widest text-sm uppercase">⚠️ No Helmet Detected</span>
+                     </>
+                  ) : (
+                     <>
+                        <ShieldCheck className="w-5 h-5" />
+                        <span className="font-bold font-logo tracking-widest text-sm uppercase">✅ Helmet Detected</span>
+                     </>
+                  )}
+               </motion.div>
+            )}
+         </AnimatePresence>
+
          {/* Static Video Overlays */}
          <div className="absolute inset-0 scanline pointer-events-none mix-blend-screen opacity-20 z-20" />
          <div className="absolute inset-0 shadow-[inset_0_0_100px_rgba(0,0,0,0.8)] pointer-events-none z-20" />
@@ -135,7 +175,7 @@ const MainLiveFeed = ({ camera, isPaused, aiEnabled, showZones, setAiEnabled, se
          </div>
 
          {/* Feed Controls */}
-         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 translate-y-8 opacity-0 group-hover:!translate-y-0 group-hover:opacity-100 transition-all duration-300 z-50">
+         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 translate-y-8 opacity-0 group-hover:!translate-y-0 group-hover:opacity-100 transition-all duration-300 z-50 pointer-events-auto">
              <div className="flex items-center gap-2 bg-black/80 backdrop-blur-md p-2 rounded-xl border border-white/10 shadow-2xl">
                 <button 
                   onClick={() => setIsPaused(!isPaused)} 
@@ -145,7 +185,7 @@ const MainLiveFeed = ({ camera, isPaused, aiEnabled, showZones, setAiEnabled, se
                 </button>
                 <div className="w-[1px] h-6 bg-white/10 mx-1" />
                 <button 
-                  onClick={() => setAiEnabled(!aiEnabled)}
+                  onClick={() => handleAiToggle(!aiEnabled)}
                   className={`p-2 rounded-lg transition-colors flex items-center gap-2 text-sm font-mono ${aiEnabled ? 'bg-accent-blue/20 text-accent-blue' : 'hover:bg-white/10 text-white/70'}`}
                 >
                    <Focus className="w-4 h-4" /> AI
@@ -235,8 +275,18 @@ const LiveMonitoring = () => {
     }
   };
 
+  const fetchAiStatus = async () => {
+    try {
+      const response = await api.get('/ai/status');
+      setAiEnabled(response.data.enabled);
+    } catch (error) {
+      console.error('Failed to fetch AI status');
+    }
+  };
+
   useEffect(() => {
     fetchCameras();
+    fetchAiStatus();
     
     // Fetch last 10 violations for history
     api.get('/violations?limit=10').then(res => {
@@ -260,6 +310,19 @@ const LiveMonitoring = () => {
       socket.off('cameraUpdate');
     };
   }, [socket]);
+
+  const handleAiToggle = async (enabled) => {
+    const previousState = aiEnabled;
+    setAiEnabled(enabled); // Optimistic update
+    
+    try {
+      await api.post('/ai/status', { enabled });
+      toast.success(`AI Detection ${enabled ? 'Enabled' : 'Disabled'}`);
+    } catch (error) {
+      setAiEnabled(previousState); // Rollback
+      toast.error('Failed to update AI status');
+    }
+  };
 
   const activeCamera = cameras.find(c => c._id === activeCameraId);
 
@@ -287,13 +350,13 @@ const LiveMonitoring = () => {
 
                <div className="flex bg-black/40 rounded-lg p-1 border border-white/10 text-[10px] font-mono">
                   <button 
-                      onClick={() => setAiEnabled(true)}
+                      onClick={() => handleAiToggle(true)}
                       className={`px-4 py-1.5 rounded-md transition-all ${aiEnabled ? 'bg-accent-blue/20 text-accent-blue' : 'text-white/40 hover:text-white'}`}
                   >
                       AI ON
                   </button>
                   <button 
-                      onClick={() => setAiEnabled(false)}
+                      onClick={() => handleAiToggle(false)}
                       className={`px-4 py-1.5 rounded-md transition-all ${!aiEnabled ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'}`}
                   >
                       AI OFF
@@ -330,8 +393,9 @@ const LiveMonitoring = () => {
                  isPaused={isPaused}
                  aiEnabled={aiEnabled}
                  showZones={showZones}
-                 setAiEnabled={setAiEnabled}
+                 handleAiToggle={handleAiToggle}
                  setIsPaused={setIsPaused}
+                 latestAlert={alerts[0]}
               />
            </motion.div>
 
